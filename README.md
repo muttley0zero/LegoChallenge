@@ -28,6 +28,12 @@ Kod:
 
 1. Funkcja load_data()
 
+```python
+def load_data():
+print(">>> Wczytywanie danych...")
+df_data = pd.read_csv(FILE_MAIN, delimiter=";")
+print("Kształt df_data:", df_data.shape)
+```
 
 Wczytywany jest plik legocolor-extended.csv, który znajduje się w folderze archive/. Po
 uruchomieniu programu otrzymujemy: "Kształt df_data: (2492, 17), co oznacza 2492
@@ -35,6 +41,35 @@ wiersze (próbki) i 17 kolumn. Każdy wiersz odpowiada jednej próbce koloru LEG
 Parametr delimiter=";" oznacza, że wartości w pliku są rozdzielone średnikami.
 
 2. Funkcja prepare_data()
+
+```python
+def prepare_data(df_data, df_color):
+    print("\n>>> Przygotowanie danych...")
+
+    if "Color" not in df_data.columns:
+        raise ValueError("Brak kolumny 'Color' w legocolor-extended.csv")
+
+    for c in ["R", "G", "B"]:
+        df_data[c] = pd.to_numeric(df_data[c], errors="coerce")
+
+    df_data = df_data.dropna(subset=["R", "G", "B", "Color"])
+    df_data[["R", "G", "B"]] = df_data[["R", "G", "B"]].astype(int)
+
+    print("Generowanie 14 cech informacyjnych...")
+    feats = {col: [] for col in FEATURE_COLS_14}
+    for r, g, b in zip(df_data["R"], df_data["G"], df_data["B"]):
+        fd = compute_color_spaces(r, g, b)
+        for col in FEATURE_COLS_14:
+            feats[col].append(fd[col])
+
+    for col in FEATURE_COLS_14:
+        df_data[col] = feats[col]
+
+    print("Dostępne klasy (kolory):", df_data["Color"].unique())
+    print("Używane kolumny cech:", FEATURE_COLS_14)
+
+    return df_data
+```
 
 Funkcja prepare_data() odpowiada za przygotowanie zbioru danych do procesu uczenia
 modeli. W pierwszej kolejności sprawdza, czy w pliku znajduje się kolumna „Color”,
@@ -80,8 +115,25 @@ Cechy dodatkowe:
 
 Kod:
 
+```python
+def compute_color_spaces(r, g, b):
+    # HSV
+    h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+    h_deg = h * 360.0
+    s_255 = s * 255.0
+    v_255 = v * 255.0
+
+    # YUV
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    u = -0.14713 * r - 0.28886 * g + 0.436 * b
+    v_yuv = 0.615 * r - 0.51499 * g - 0.10001 * b
+```
+
 **1. Normalizacja RGB -> HSV**
 
+```python
+h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+```
 
 RGB to:
 
@@ -99,6 +151,12 @@ Zamiast (R, G, B) otrzymujemy, jaki to jest kolor i jak intensywny
 
 **2. Skalowanie HSV**
 
+```python
+    h_deg = h * 360.0
+    s_255 = s * 255.0
+    v_255 = v * 255.0
+```
+
 HSV z biblioteki jest w zakresie 0- 1
 
 Modele ML lepiej działają na "ludzkich zakresach" (cechy powinny być w podobnych,
@@ -106,6 +164,10 @@ małych skalach (np. 0–1 lub standaryzowane), bo modele ML nie radzą sobie z 
 różnicami wartości między cechami).
 
 **3. YUV – model światła**
+
+```python
+y = 0.299 * r + 0.587 * g + 0.114 * b
+```
 
 To jest fizyczny model luminancji:
 
@@ -115,6 +177,11 @@ To jest fizyczny model luminancji:
 
 Y = jasność
 
+```python
+    u = -0.14713 * r - 0.28886 * g + 0.436 * b
+    v_yuv = 0.615 * r - 0.51499 * g - 0.10001 * b
+```
+
 U i V opisują odcień koloru i oddzielają kolor od jasności
 
 
@@ -122,6 +189,16 @@ Model dostaje nie tylko RGB, ale też percepcję (HSV), fizykę światła (YUV),
 normalizację, czyli 3 różne perspektywy koloru.
 
 ## Normalizacja RGB + cechy dodatkowe
+
+```python
+    s_rgb = r + g + b
+    if s_rgb == 0:
+        r_norm = g_norm = b_norm = 0.0
+    else:
+        r_norm = r / s_rgb
+        g_norm = g / s_rgb
+        b_norm = b / s_rgb
+```
 
 Ten kod zamienia RGB na wersję znormalizowaną, RGB mówi, ile jest światła
 czerwonego, zielonego i niebieskiego, ale RGB nie zależy od jasności.
@@ -135,23 +212,49 @@ to ten sam kolor, ale inne wartości
 
 1. Suma kanałów
 
+```python
+s_rgb = r + g + b
+```
+
 To mówi, ile łącznie światła jest w pikselu.
 
 2. Podział przed sumę
 
+```python
+        r_norm = r / s_rgb
+        g_norm = g / s_rgb
+        b_norm = b / s_rgb
+```
+
 Zamiast absolutnych wartości jest udział kanałów:
 
+```python
+r_norm = g_norm = b_norm = 1
+```
+
 3. Warunek s_rgb == 0
+
+```python
+    if s_rgb == 0:
+        r_norm = g_norm = b_norm = 0.0
+```
 
 Jeżeli R=0, G=0, B=0 to będzie czarny piksel.
 
 4. DITS_RG
 
+```python
+dist_rg = abs(r - g)
+```
 
 Mierzy różnicę miedzy czerwonym i zielonym, pomaga rozróżniać czerwony vs żółty vs
 pomarańczowy.
 
 5. SAT INDEX
+
+```python
+sat_index = 0.0 if max_c == 0 else (max_c - min_c) / max_c
+```
 
 0 – szary
 
@@ -184,6 +287,48 @@ Kod
 
 1. Funkcja train_and_select_classical_models
 
+```python
+def train_and_select_classical_models(X_train, y_train):
+    print("\n>>> Trening klasycznych modeli i wybór najlepszego...")
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+
+    # USUNIĘTO multi_class="auto" (zapobieganie FutureWarning w scikit-learn >= 1.5)
+    models = {
+        "LogisticRegression": LogisticRegression(max_iter=1000),
+        "KNN": KNeighborsClassifier(n_neighbors=5),
+        "RandomForest": RandomForestClassifier(n_estimators=200, random_state=42),
+        "GradientBoosting": GradientBoostingClassifier(random_state=42),
+        "SVC_RBF": SVC(kernel="rbf", C=5, gamma="scale", probability=False),
+        "LinearSVC": LinearSVC(C=1.0),
+        "Perceptron": Perceptron(max_iter=1000, random_state=42),
+        "MLP": MLPClassifier(hidden_layer_sizes=(64, 32), max_iter=500, random_state=42),
+        "GaussianNB": GaussianNB()
+    }
+
+    results = []
+
+    for name, model in models.items():
+        try:
+            scores = cross_val_score(model, X_train_scaled, y_train, cv=5, scoring="accuracy")
+            mean_acc = scores.mean()
+            results.append((name, mean_acc))
+            print(f"Model: {name:18s} | CV Accuracy: {mean_acc:.4f}")
+        except Exception as e:
+            print(f"Model: {name:18s} | BŁĄD w treningu: {e}")
+
+    results = [r for r in results if not np.isnan(r[1])]
+    results.sort(key=lambda x: x[1], reverse=True)
+
+    best_name, best_score = results[0]
+    best_model = models[best_name]
+    best_model.fit(X_train_scaled, y_train)
+
+    print(f"\n>>> Najlepszy klasyczny model: {best_name} (CV Accuracy = {best_score:.4f})")
+
+    return best_model, scaler, results, X_train_scaled
+```
 
 Funkcja odpowiada za kompleksowy proces trenowania oraz porównania klasycznych
 modeli uczenia maszynowego, a następnie wybór najlepszego z nich.
@@ -213,6 +358,38 @@ Funkcja zwraca:
 - przeskalowany zbiór treningowy.
 2. Funkcja evaluate_model
 
+```python
+def evaluate_model(model, scaler, X_test, y_test, label_encoder):
+    print("\n>>> Ewaluacja najlepszego klasycznego modelu...")
+
+    X_test_scaled = scaler.transform(X_test)
+    y_pred = model.predict(X_test_scaled)
+
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred, average="weighted", zero_division=0)
+    rec = recall_score(y_test, y_pred, average="weighted", zero_division=0)
+    f1 = f1_score(y_test, y_pred, average="weighted", zero_division=0)
+
+    print(f"Accuracy : {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall   : {rec:.4f}")
+    print(f"F1-score : {f1:.4f}")
+
+    print("\n>>> Raport klasyfikacji (klasyczny model):")
+    print(classification_report(y_test, y_pred, target_names=label_encoder.classes_, zero_division=0))
+
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=False, cmap="Blues")
+    plt.title("Confusion Matrix – klasyczny model (14 cech)")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
+    plt.show()
+
+    return acc, prec, rec, f1, y_pred
+```
+
 Funkcja służy do oceny finalnego, wybranego modelu klasycznego na zbiorze
 testowym.
 
@@ -233,6 +410,19 @@ za pomocą mapy cieplnej, co umożliwia analizę błędów klasyfikatora.
 Na końcu funkcja zwraca obliczone metryki oraz predykcje modelu.
 
 3. Funkcja plot_feature_importance
+
+```python
+def plot_feature_importance(model, feature_names):
+    if hasattr(model, "feature_importances_"):
+        importances = model.feature_importances_
+        plt.figure(figsize=(6, 4))
+        sns.barplot(x=importances, y=feature_names, orient="h")
+        plt.title("Feature Importance (model drzewiasty)")
+        plt.tight_layout()
+        plt.show()
+    else:
+        print("Model nie posiada atrybutu feature_importances_ – pomijam wykres.")
+```
 
 Funkcja służy do wizualizacji ważności cech wejściowych w modelu, o ile dany model
 udostępnia atrybut feature_importances_.
@@ -268,10 +458,18 @@ Kod
 
 1. Definicja klasy
 
+```python
+class FeatureDataset(Dataset)
+```
+
 Klasa dziedziczy po Dataset z modułu torch.utils.data. Oznacza to, że staje się własnym
 zbiorem danych zgodnym z wymaganiami PyTorch.
 
 2. Konstruktor __init__
+
+```python
+def __init__(self, X, y=None)
+```
 
 Konstruktor jest wywoływany podczas tworzenia obiektu klasy. Przykład:
 
@@ -284,10 +482,18 @@ Parametry:
 - y – etykiety klas (opcjonalne)
 3. Konwersja danych do tensorów
 
+```python
+self.X = torch.tensor(X, dtype=torch.float32)
+```
+
 Dane wejściowe są zamieniane na tensor PyTorch typu float32. Typ float32 jest
 standardowo wykorzystywany podczas obliczeń w sieciach neuronowych.
 
 4. Konwersja etykiet klas
+
+```python
+self.y = None if y is None else torch.tensor(y, dtype=torch.long)
+```
 
 Tutaj sprawdzane jest, czy przekazano etykiety. Jeżeli y is None to self.y = None,
 przypadek taki występuje np. podczas kodowania danych przez autoenkoder, gdzie
@@ -297,14 +503,30 @@ przez funkcję CrossEntropyLoss() wykorzstywaną w klasyfikacji.
 
 5. Metoda __len__
 
+```python
+def __len__(self):
+    return self.X.shape[0]
+```
 
 Zwraca liczbę próbek znajdujących się w zbiorze danych.
 
 6. Metoda __getitem__
 
+```python
+def __getitem__(self, idx):
+    if self.y is None:
+        return self.X[idx]
+    return self.X[idx], self.y[idx]
+```
+
 Metoda odpowiada za pobranie pojedynczej próbki o indeksie idx.
 
 **Jak wykorzystywana jest ta klasa?**
+
+```python
+dataset = FeatureDataset(X_train_scaled)
+loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+```
 
 FeatureDataset(X_train_scaled) tworzy dataset – tylko cechy X, bez etykiet y, ponieważ
 enkoder uczy się rekonstrukcji.
@@ -315,6 +537,7 @@ W treningu PyTorch automatycznie wywołuje __getitem __, który pobiera kolejne 
 tworzy batch
 
 Schemat działania
+
 
 
 ## Autoenkoder MLP (14 cech)
