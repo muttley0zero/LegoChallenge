@@ -538,7 +538,9 @@ tworzy batch
 
 Schemat działania
 
-
+<div align="center">
+  <img src="assets/schemat1.png" width="200" alt="Schemat działania">
+</div>
 
 ## Autoenkoder MLP (14 cech)
 
@@ -560,6 +562,26 @@ Kod
 
 1. Klasa Autoencoder
 
+```python
+class Autoencoder(nn.Module):
+    def __init__(self, input_dim, latent_dim=8):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, latent_dim)
+        )
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, input_dim)
+        )
+
+    def forward(self, x):
+        z = self.encoder(x)
+        x_rec = self.decoder(z)
+        return x_rec, z
+```
 
 Klasa Autoencoder definiuje prosty autoenkoder oparty na sieci neuronowej MLP,
 którego zadaniem jest nauczenie się kompresji i rekonstrukcji danych wejściowych.
@@ -578,6 +600,32 @@ wykorzystanie go zarówno do rekonstrukcji, jak i redukcji wymiarowości danych.
 
 2. Funkcja train_autoencoder
 
+```python
+def train_autoencoder(X_train_scaled, input_dim, latent_dim=8, epochs=20, batch_size=128, lr=1e-3):
+    print("\n>>> Trening MLP autoenkodera na 14 cechach...")
+    dataset = FeatureDataset(X_train_scaled)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    model = Autoencoder(input_dim=input_dim, latent_dim=latent_dim).to(DEVICE)
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    model.train()
+    for epoch in range(1, epochs + 1):
+        total_loss = 0.0
+        for batch in loader:
+            batch = batch.to(DEVICE)
+            optimizer.zero_grad()
+            x_rec, _ = model(batch)
+            loss = criterion(x_rec, batch)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * batch.size(0)
+        avg_loss = total_loss / len(dataset)
+        print(f"Epoch {epoch:02d}/{epochs} | AE loss: {avg_loss:.6f}")
+
+    return model
+```
 
 Funkcja train_autoencoder odpowiada za pełny proces uczenia autoenkodera MLP
 na przygotowanych 14 cechach opisujących kolory LEGO. Na początku dane wejściowe
@@ -602,6 +650,20 @@ rekonstrukcji danych wejściowych.
 
 3. encode_with ___ autoencoder
 
+```python
+def encode_with_autoencoder(model, X_scaled):
+    model.eval()
+    dataset = FeatureDataset(X_scaled)
+    loader = DataLoader(dataset, batch_size=256, shuffle=False)
+    zs = []
+    with torch.no_grad():
+        for batch in loader:
+            batch = batch.to(DEVICE)
+            _, z = model(batch)
+            zs.append(z.cpu().numpy())
+    Z = np.vstack(zs)
+    return Z
+```
 
 Funkcja encode_with_autoencoder służy do przekształcenia danych wejściowych do
 przestrzeni latentnej (ukrytej reprezentacji) przy użyciu wcześniej wytrenowanego
@@ -641,6 +703,29 @@ Kod
 
 1. Klasa FeatureTransformerClassifier
 
+```python
+class FeatureTransformerClassifier(nn.Module):
+    def __init__(self, input_dim, num_classes, d_model=64, nhead=4, num_layers=2, dim_feedforward=128):
+        super().__init__()
+        self.proj = nn.Linear(input_dim, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            batch_first=True
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.cls_head = nn.Linear(d_model, num_classes)
+
+    def forward(self, x):
+        x = self.proj(x)
+        x = x.unsqueeze(1)
+        x = self.encoder(x)
+        x = x.mean(dim=1)
+        logits = self.cls_head(x)
+        return logits
+```
+
 To klasa definiująca model klasyfikacyjny oparty na architekturze Transformer,
 zaimplementowany w PyTorch.
 
@@ -671,7 +756,43 @@ W metodzie forward:
 3. Dane przechodzą przez encoder Transformer.
 4. Następuje uśrednienie po wymiarze sekwencji.
 5. Wynik trafia do warstwy klasyfikacyjnej, która zwraca logity.
+
 2. Funkcja train_transformer_classifier
+
+```python
+def train_transformer_classifier(X_train_scaled, y_train, input_dim, num_classes,
+                                 epochs=20, batch_size=128, lr=1e-3):
+    print("\n>>> Trening transformerowego klasyfikatora cech...")
+    dataset = FeatureDataset(X_train_scaled, y_train)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    model = FeatureTransformerClassifier(input_dim=input_dim, num_classes=num_classes).to(DEVICE)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    model.train()
+    for epoch in range(1, epochs + 1):
+        total_loss = 0.0
+        correct = 0
+        total = 0
+        for Xb, yb in loader:
+            Xb = Xb.to(DEVICE)
+            yb = yb.to(DEVICE)
+            optimizer.zero_grad()
+            logits = model(Xb)
+            loss = criterion(logits, yb)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * Xb.size(0)
+            preds = logits.argmax(dim=1)
+            correct += (preds == yb).sum().item()
+            total += yb.size(0)
+        avg_loss = total_loss / len(dataset)
+        acc = correct / total
+        print(f"Epoch {epoch:02d}/{epochs} | Loss: {avg_loss:.4f} | Acc: {acc:.4f}")
+
+    return model
+```
 
 Funkcja odpowiada za trenowanie modelu Transformerowego.
 
@@ -700,7 +821,40 @@ Na końcu każdej epoki wypisywane są:
 - średnia strata,
 - dokładność klasyfikacji.
 Funkcja zwraca wytrenowany model.
+
 3. Funkcja evaluate_transformer
+
+```python
+def evaluate_transformer(model, X_test_scaled, y_test):
+    model.eval()
+    dataset = FeatureDataset(X_test_scaled, y_test)
+    loader = DataLoader(dataset, batch_size=256, shuffle=False)
+
+    all_preds = []
+    all_true = []
+    with torch.no_grad():
+        for Xb, yb in loader:
+            Xb = Xb.to(DEVICE)
+            logits = model(Xb)
+            preds = logits.argmax(dim=1).cpu().numpy()
+            all_preds.append(preds)
+            all_true.append(yb.numpy())
+    y_pred = np.concatenate(all_preds)
+    y_true = np.concatenate(all_true)
+
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred, average="weighted", zero_division=0)
+    rec = recall_score(y_true, y_pred, average="weighted", zero_division=0)
+    f1 = f1_score(y_true, y_pred, average="weighted", zero_division=0)
+
+    print("\n>>> Transformer – wyniki na zbiorze testowym:")
+    print(f"Accuracy : {acc:.4f}")
+    print(f"Precision: {prec:.4f}")
+    print(f"Recall   : {rec:.4f}")
+    print(f"F1-score : {f1:.4f}")
+
+    return acc, prec, rec, f1, y_pred
+```
 
 Funkcja służy do oceny wytrenowanego modelu na zbiorze testowym.
 
@@ -753,6 +907,33 @@ Kod
 
 1. Funkcja extract_real_patch
 
+```python
+PATCH_SIZE = 11
+LATENT_DIM_CNN = 8
+
+
+def extract_real_patch(img_np, x, y, patch_size=11):
+    h, w, _ = img_np.shape
+    half = patch_size // 2
+
+    y_start = max(0, y - half)
+    y_end = min(h, y + half + 1)
+    x_start = max(0, x - half)
+    x_end = min(w, x + half + 1)
+
+    patch = img_np[y_start:y_end, x_start:x_end]
+
+    if patch.shape[0] != patch_size or patch.shape[1] != patch_size:
+        padded_patch = np.zeros((patch_size, patch_size, 3), dtype=img_np.dtype)
+        t_y_start = half - (y - y_start)
+        t_y_end = t_y_start + (y_end - y_start)
+        t_x_start = half - (x - x_start)
+        t_x_end = t_x_start + (x_end - x_start)
+        padded_patch[t_y_start:t_y_end, t_x_start:t_x_end] = patch
+        patch = padded_patch
+
+    return patch.transpose(2, 0, 1).astype(np.float32) / 255.0
+```
 
 Funkcja służy do bezpiecznego wycinania fragmentów obrazu o stałym rozmiarze 11×
 pikseli wokół wskazanego punktu (x, y). Najpierw wyznaczany jest obszar wycinka z
@@ -765,6 +946,28 @@ przygotowuje go do dalszego przetwarzania przez sieć neuronową.
 
 2. Funkcja generate_textured_patch
 
+```python
+def generate_textured_patch(r, g, b, patch_size=11):
+    patch = np.zeros((3, patch_size, patch_size), dtype=np.float32)
+    patch[0, :, :] = r / 255.0
+    patch[1, :, :] = g / 255.0
+    patch[2, :, :] = b / 255.0
+
+    # Generowanie delikatnego gradientu imitującego załamanie światła na plastiku
+    x = np.linspace(-1, 1, patch_size)
+    y = np.linspace(-1, 1, patch_size)
+    xv, yv = np.meshgrid(x, y)
+    gradient = (xv + yv) * 0.02
+    
+    for c in range(3):
+        patch[c, :, :] += gradient
+
+    # Sztuczny szum cyfrowy matrycy aparatu
+    noise = np.random.normal(0, 0.015, (3, patch_size, patch_size))
+    patch += noise
+    
+    return np.clip(patch, 0.0, 1.0)
+```
 
 Funkcja generuje sztuczny patch obrazu o zadanych wartościach RGB, wzbogacony o
 elementy imitujące rzeczywiste właściwości wizualne. Na początku tworzony jest
@@ -777,6 +980,18 @@ wejściowych.
 
 3. Klasa PatchDataset
 
+```python
+class PatchDataset(Dataset):
+    def __init__(self, X_patches):
+        self.X_patches = X_patches
+
+    def __len__(self):
+        return self.X_patches.shape[0]
+
+    def __getitem__(self, idx):
+        return torch.tensor(self.X_patches[idx], dtype=torch.float32)
+```
+
 Klasa PatchDataset stanowi implementację zbioru danych w formacie zgodnym z
 PyTorch i przechowuje zestaw patchy obrazów. Jej zadaniem jest umożliwienie
 wygodnego dostępu do danych w procesie uczenia sieci neuronowej. Metoda __len__
@@ -786,6 +1001,60 @@ przetwarzane przez mechanizm DataLoader.
 
 
 4. Klasa CNNAutoencoder
+
+```python
+class CNNAutoencoder(nn.Module):
+    def __init__(self, latent_dim=LATENT_DIM_CNN):
+        super().__init__()
+        # Encoder: 11x11 -> 5x5 -> 2x2
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, padding=1),  # 11x11 -> 11x11
+            nn.ReLU(),
+            nn.MaxPool2d(2),                             # 11x11 -> 5x5
+            nn.Conv2d(16, 32, kernel_size=3, padding=1), # 5x5 -> 5x5
+            nn.ReLU(),
+            nn.MaxPool2d(2)                              # 5x5 -> 2x2
+        )
+        self.enc_fc = nn.Linear(32 * 2 * 2, latent_dim)
+
+        # Decoder: 2x2 -> 5x5 -> 11x11
+        self.dec_fc = nn.Linear(latent_dim, 32 * 2 * 2)
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(
+                32, 16,
+                kernel_size=4,
+                stride=2,
+                padding=1,
+                output_padding=1
+            ),
+            nn.ReLU(),
+            nn.ConvTranspose2d(
+                16, 3,
+                kernel_size=4,
+                stride=2,
+                padding=1,
+                output_padding=1
+            ),
+            nn.Sigmoid()
+        )
+
+    def encode(self, x):
+        z = self.encoder(x)
+        z = z.view(z.size(0), -1)
+        z = self.enc_fc(z)
+        return z
+
+    def decode(self, z):
+        x = self.dec_fc(z)
+        x = x.view(x.size(0), 32, 2, 2)
+        x = self.decoder(x)
+        return x
+
+    def forward(self, x):
+        z = self.encode(x)
+        x_rec = self.decode(z)
+        return x_rec, z
+```
 
 Klasa CNNAutoencoder definiuje konwolucyjny autoenkoder przeznaczony do
 kompresji i rekonstrukcji małych fragmentów obrazu 11×11. Model składa się z
@@ -804,6 +1073,33 @@ dekodowanie oraz pełny przepływ danych przez model.
 
 5. Funkcja train_cnn_autoencoder
 
+```python
+def train_cnn_autoencoder(X_patches, epochs=20, batch_size=128, lr=1e-3):
+    print("\n>>> Trening CNN autoenkodera na patchach przestrzennych...")
+    dataset = PatchDataset(X_patches)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    model = CNNAutoencoder(latent_dim=LATENT_DIM_CNN).to(DEVICE)
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    model.train()
+    for epoch in range(1, epochs + 1):
+        total_loss = 0.0
+        for batch in loader:
+            batch = batch.to(DEVICE)
+            optimizer.zero_grad()
+            x_rec, _ = model(batch)
+            loss = criterion(x_rec, batch)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * batch.size(0)
+        avg_loss = total_loss / len(dataset)
+        print(f"Epoch {epoch:02d}/{epochs} | CNN AE loss: {avg_loss:.6f}")
+
+    return model
+```
+
 Funkcja odpowiada za proces trenowania konwolucyjnego autoenkodera na zbiorze
 patchy obrazów. Na początku tworzony jest dataset oraz DataLoader, które umożliwiają
 przetwarzanie danych w batchach. Następnie inicjalizowany jest model autoenkodera,
@@ -815,6 +1111,20 @@ raportowana jest średnia wartość straty, co pozwala monitorować proces uczen
 
 6. Funkcja encode_with_cnn_autoencoder
 
+```python
+def encode_with_cnn_autoencoder(model, X_patches, batch_size=256):
+    dataset = PatchDataset(X_patches)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    zs = []
+    model.eval()
+    with torch.no_grad():
+        for batch in loader:
+            batch = batch.to(DEVICE)
+            z = model.encode(batch)
+            zs.append(z.cpu().numpy())
+    Z = np.vstack(zs)
+    return Z
+```
 
 Funkcja służy do ekstrakcji reprezentacji latentnych dla zbioru patchy przy użyciu
 wytrenowanego autoenkodera. Model ustawiany jest w tryb ewaluacji, a dane
@@ -840,8 +1150,52 @@ Modele w GUI:
 
 Kod
 
-1. Funkcja ope_image_and_click
+1. Funkcja open_image_and_click
 
+```python
+def open_image_and_click(model_14, scaler_14, label_encoder, image_path,
+                         feature_cols_14,
+                         cnn_model=None, rf_cnn=None, scaler_cnn=None):
+    print(f"\n>>> Ładowanie obrazu: {image_path}")
+    img = Image.open(image_path).convert("RGB")
+    img_np = np.array(img)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(img_np)
+    ax.set_title("Kliknij w piksel z kolorem klocka")
+    ax.axis("off")
+
+    def onclick(event):
+        if event.xdata is None or event.ydata is None:
+            return
+        x = int(event.xdata)
+        y = int(event.ydata)
+        r, g, b = map(int, img_np[y, x])
+        print(f"\nKliknięto w punkt: (x={x}, y={y}) | RGB=({r},{g},{b})")
+
+        X_sample_14 = get_pixel_features_14(r, g, b, feature_cols_14)
+        X_sample_scaled_14 = scaler_14.transform(X_sample_14)
+        y_pred_14 = model_14.predict(X_sample_scaled_14)
+        color_14 = label_encoder.inverse_transform(y_pred_14)[0]
+        print(f"Przewidywany kolor (14F): {color_14}")
+
+        # Poprawne wycinanie rzeczywistego kontekstu przestrzennego
+        if cnn_model is not None and rf_cnn is not None and scaler_cnn is not None:
+            real_patch = extract_real_patch(img_np, x, y, patch_size=PATCH_SIZE)
+            patch_t = torch.tensor(real_patch, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+            with torch.no_grad():
+                z = cnn_model.encode(patch_t).cpu().numpy()
+            z_scaled = scaler_cnn.transform(z)
+            y_pred_cnn = rf_cnn.predict(z_scaled)
+            color_cnn = label_encoder.inverse_transform(y_pred_cnn)[0]
+            print(f"Przewidywany kolor (CNN latent): {color_cnn}")
+
+        ax.plot(x, y, "ro", markersize=5)
+        fig.canvas.draw()
+
+    fig.canvas.mpl_connect("button_press_event", onclick)
+    plt.show()
+```
 
 Funkcja umożliwia interaktywną analizę obrazu poprzez kliknięcie w wybrany piksel i
 predykcję jego klasy na podstawie dwóch różnych podejść modelowych. Na początku
@@ -884,6 +1238,7 @@ W main() wykonywane są kolejno:
 8. GUI + test obrazu
 
 Schemat całego procesu:
+
 
 
 ## Wyniki
