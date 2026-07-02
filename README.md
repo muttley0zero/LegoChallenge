@@ -1239,12 +1239,17 @@ W main() wykonywane są kolejno:
 
 Schemat całego procesu:
 
-
+<div align="center">
+  <img src="assets/schemat2.png" width="500" alt="Schemat pipeline">
+</div>
 
 ## Wyniki
 
 1. Wizualizacja przestrzeni RGB
 
+<div align="center">
+  <img src="assets/obraz1.png" width="400" alt="przestrzeń RGB">
+</div>
 
 Na rysunku przedstawiono rozkład kolorów LEGO w przestrzeni RGB. Widać wyraźne
 skupiska odpowiadające poszczególnym barwom. Niektóre kolory (np. Orange, Red,
@@ -1253,6 +1258,9 @@ Grey, Black) tworzą nakładające się klastry, co sugeruje trudność klasyfik
 
 2. Klasyczne modele ML – wyniki
 
+<div align="center">
+  <img src="assets/obraz2.png" width="400" alt="Macierz pomyłek">
+</div>
 
 Przetestowano 9 klasycznych modeli ML. Najwyższe CV Accuracy uzyskał
 MLPClassifier (0.8655), a następnie SVC RBF (0.8605) i RandomForest (0.8565).
@@ -1309,6 +1317,9 @@ Wynik jest niższy, ponieważ patch był jednolity (brak tekstury), a CNN nie mi
 się nauczyć poza kolorem — co klasyczne cechy robią lepiej.
 6. GUI - działanie systemu
 
+<div align="center">
+  <img src="assets/obraz3.png" width="400" alt="GUI">
+</div>
 
 Zaimplementowano graficzny interfejs użytkownika umożliwiający wczytanie zdjęcia i
 kliknięcie w dowolny piksel.
